@@ -1,0 +1,17 @@
+# --- Backend (Python/FastAPI) ---
+venv/
+__pycache__/
+*.pyc
+backend/.env
+backend/*.db
+
+# --- Frontend (React) ---
+node_modules/
+frontend/.env
+frontend/build/
+frontend/dist/
+
+# --- Generales ---
+.vscode/
+.DS_Store
+*.log
