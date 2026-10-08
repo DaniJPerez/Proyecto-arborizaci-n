@@ -4,7 +4,7 @@ from supabase import create_client
 
 load_dotenv()
 sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_ANON_KEY"])
-sb.auth.sign_in_with_password({"email": "johan@gmail.com", "password": "123456"})
+sb.auth.sign_in_with_password({"email": os.environ["TEST_EMAIL2"], "password": os.environ["TEST_PASSWORD2"]})
 
 # Prueba A: ¿puede ver los árboles de otro usuario?
 print("A) ve árboles ->", len(sb.table("arboles").select("*").execute().data))
