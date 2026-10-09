@@ -11,7 +11,7 @@ from tests.conftest import ARBOL, CUERPO_ARBOL
 
 # ------------------------------- Públicos y acceso -------------------------------
 def test_salud():
-    assert TestClient(main.app).get("/salud").json() == {"estado": "ok"}
+    assert TestClient(main.app).get("/salud").json()["estado"] == "ok"
 
 
 def test_sin_token_da_401():

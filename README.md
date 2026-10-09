@@ -28,6 +28,12 @@ uvicorn main:app --reload
 ```
 
 El backend queda disponible en `http://127.0.0.1:8000` (documentación interactiva en `/docs`).
+Sin `SUPABASE_URL`, inicia automáticamente en modo SQLite temporal para demos:
+árboles en `backend/data/inventario.sqlite3`, fotos en `backend/storage/fotos/`,
+correo `demo@arboles.local` y contraseña `demo123`. Los catálogos son datos de
+ejemplo; no uses este modo con datos reales. Los archivos locales no se suben a Git.
+Consulta [backend/README_backend.md](backend/README_backend.md) para configurar SQLite
+o volver a Supabase.
 
 ## Cómo levantar el frontend
 

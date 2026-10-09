@@ -1,544 +1,281 @@
-import { useMemo, useState } from 'react';
+import { Controller } from 'react-hook-form';
+import { Image } from 'expo-image';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { palette } from '@/config/constants';
+import { useTreeCreateForm } from '@/features/trees/hooks/useTreeCreateForm';
+import type { Catalogos } from '@/features/catalogs/types';
+import type { ArbolCrear, FotoLocal } from '@/features/trees/types';
 import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  Pressable,
-  View,
-} from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+  ChoiceChip,
+  Field,
+  Heading,
+  InlineMessage,
+  PrimaryButton,
+  Screen,
+  Section,
+  SelectField,
+  Surface,
+} from '@/shared/components/FormControls';
 
-import { treesService } from '@/features/trees/services/treesService';
-import type { ArbolResumen } from '@/shared/types/entities';
-
-type EstadoArbol = 'sano' | 'riesgo' | 'critico';
-
-const filtros = [
-  { label: 'Todos', value: 'todos' },
-  { label: 'Sanos', value: 'sano' },
-  { label: 'En riesgo', value: 'riesgo' },
-  { label: 'Críticos', value: 'critico' },
-] as const;
-
-const coloresEstado: Record<EstadoArbol, string> = {
-  sano: '#15803D',
-  riesgo: '#B45309',
-  critico: '#B91C1C',
-};
-
-const etiquetasEstado: Record<EstadoArbol, string> = {
-  sano: 'Sano',
-  riesgo: 'En riesgo',
-  critico: 'Crítico',
-};
-
-function normalizarEstado(estado: string): EstadoArbol {
-  if (estado === 'riesgo' || estado === 'critico') {
-    return estado;
-  }
-
-  return 'sano';
+interface Props {
+  catalogs: Catalogos;
+  submitting: boolean;
+  submitError?: string;
+  onSubmit: (values: ArbolCrear, photos: FotoLocal[]) => Promise<void>;
 }
 
-export default function TreeListScreen() {
-  const [busqueda, setBusqueda] = useState('');
-  const [filtro, setFiltro] = useState<string>('todos');
+const zonas = ['Patio central', 'Entrada principal', 'Zona deportiva', 'Bloques académicos', 'Otra'] as const;
+const etapas = ['Plántula', 'Juvenil', 'Adulto', 'Senescente'] as const;
+const interferencias = [
+  'Ninguna',
+  'Levantamiento de pisos',
+  'Afectación de muros',
+  'Cables eléctricos',
+  'Otra infraestructura',
+] as const;
 
-  const {
-    data: arboles = [],
-    isLoading,
-    isError,
-    error,
-    refetch,
-    isFetching,
-  } = useQuery<ArbolResumen[]>({
-    queryKey: ['arboles'],
-    queryFn: treesService.getAll,
-  });
-
-  const arbolesFiltrados = useMemo(() => {
-    const texto = busqueda.trim().toLowerCase();
-
-    return arboles.filter((arbol) => {
-      const coincideTexto = [
-        arbol.codigo,
-        arbol.nombre_comun,
-        arbol.nombre_cientifico,
-        arbol.zona,
-        arbol.nombre_corto,
-      ].some((valor) => String(valor ?? '').toLowerCase().includes(texto));
-
-      const estado = normalizarEstado(arbol.estado);
-      const coincideEstado = filtro === 'todos' || estado === filtro;
-
-      return coincideTexto && coincideEstado;
-    });
-  }, [arboles, busqueda, filtro]);
+export function TreeCreateForm({ catalogs, submitting, submitError, onSubmit }: Props) {
+  const form = useTreeCreateForm(onSubmit);
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-    >
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>GESTIÓN AMBIENTAL</Text>
+    <Screen>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Heading
+          subtitle="Registra ubicación, medidas, observaciones y evidencia fotográfica del árbol."
+        >
+          Nuevo árbol
+        </Heading>
 
-        <Text style={styles.title}>Inventario de árboles</Text>
+        <Section title="Identificación y ubicación">
+          <Controller
+            name="institucion_id"
+            control={form.control}
+            render={({ field }) => (
+              <SelectField
+                label="Institución"
+                value={field.value}
+                options={catalogs.instituciones.map((item) => ({
+                  label: item.nombre,
+                  value: item.id,
+                }))}
+                onChange={field.onChange}
+              />
+            )}
+          />
+          <Controller
+            name="zona"
+            control={form.control}
+            render={({ field }) => (
+              <SelectField
+                label="Zona"
+                value={field.value}
+                options={zonas.map((value) => ({ label: value, value }))}
+                onChange={field.onChange}
+              />
+            )}
+          />
+          {form.zonaActual === 'Otra' ? (
+            <Controller
+              name="zona_otra"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <Field
+                  label="Especifica la zona"
+                  value={field.value}
+                  onChangeText={field.onChange}
+                  onBlur={field.onBlur}
+                  error={fieldState.error?.message}
+                />
+              )}
+            />
+          ) : null}
+          <PrimaryButton
+            title={form.gps.loading ? 'Obteniendo ubicación…' : 'Capturar ubicación GPS'}
+            onPress={() => void form.updateLocation()}
+            loading={form.gps.loading}
+            variant="secondary"
+          />
+          {form.gps.location ? (
+            <Text style={styles.helper}>
+              {form.gps.location.lat.toFixed(6)}, {form.gps.location.lng.toFixed(6)}
+              {form.gps.location.accuracy == null
+                ? ''
+                : ` · precisión ${Math.round(form.gps.location.accuracy)} m`}
+            </Text>
+          ) : null}
+          {form.gps.error ? <InlineMessage>{form.gps.error}</InlineMessage> : null}
+        </Section>
 
-        <Text style={styles.subtitle}>
-          Consulta y organiza los árboles registrados en el sistema.
-        </Text>
-      </View>
-
-      <View style={styles.summary}>
-        <Text style={styles.summaryLabel}>Árboles encontrados</Text>
-
-        <Text style={styles.summaryNumber}>
-          {isLoading ? '...' : arbolesFiltrados.length}
-        </Text>
-
-        <Text style={styles.summaryDescription}>
-          Registros disponibles en el inventario
-        </Text>
-      </View>
-
-      <TextInput
-        style={styles.search}
-        placeholder="Buscar por nombre, código o zona..."
-        placeholderTextColor="#7A8A80"
-        value={busqueda}
-        onChangeText={setBusqueda}
-        accessibilityLabel="Buscar árboles"
-      />
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filters}
-      >
-        {filtros.map((item) => {
-          const seleccionado = filtro === item.value;
-
-          return (
-            <Pressable
-              key={item.value}
-              onPress={() => setFiltro(item.value)}
-              style={[
-                styles.filterButton,
-                seleccionado && styles.filterSelected,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.filterText,
-                  seleccionado && styles.filterTextSelected,
-                ]}
-              >
-                {item.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Registros</Text>
-
-        {!isLoading && !isError && (
-          <Text style={styles.resultCount}>
-            {arbolesFiltrados.length} resultados
+        <Section title="Fotografías">
+          <Text style={styles.helper}>
+            La fotografía general es obligatoria. Puedes agregar una de detalle y hasta tres
+            adicionales.
           </Text>
-        )}
-      </View>
-
-      {isLoading ? (
-        <View style={styles.messageCard}>
-          <ActivityIndicator size="large" color="#1D5638" />
-
-          <Text style={styles.messageTitle}>Cargando inventario...</Text>
-
-          <Text style={styles.messageText}>
-            Estamos consultando los árboles registrados.
-          </Text>
-        </View>
-      ) : isError ? (
-        <View style={styles.messageCard}>
-          <Text style={styles.errorIcon}>!</Text>
-
-          <Text style={styles.messageTitle}>
-            No pudimos cargar los árboles
-          </Text>
-
-          <Text style={styles.messageText}>
-            {error instanceof Error
-              ? error.message
-              : 'Comprueba la conexión con el servidor e inténtalo de nuevo.'}
-          </Text>
-
-          <Pressable style={styles.retryButton} onPress={() => void refetch()}>
-            <Text style={styles.retryButtonText}>Reintentar</Text>
-          </Pressable>
-        </View>
-      ) : arbolesFiltrados.length === 0 ? (
-        <View style={styles.messageCard}>
-          <Text style={styles.emptyEmoji}>🌱</Text>
-
-          <Text style={styles.messageTitle}>
-            {arboles.length === 0
-              ? 'Todavía no hay árboles registrados'
-              : 'No hay resultados'}
-          </Text>
-
-          <Text style={styles.messageText}>
-            {arboles.length === 0
-              ? 'Cuando existan registros en el sistema, aparecerán aquí.'
-              : 'Prueba con otro nombre o selecciona un filtro diferente.'}
-          </Text>
-        </View>
-      ) : (
-        <>
-          {arbolesFiltrados.map((arbol) => {
-            const estado = normalizarEstado(arbol.estado);
-            const color = coloresEstado[estado];
-
-            return (
-              <View key={arbol.id} style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.treeIcon}>
-                    <Text style={styles.treeEmoji}>🌳</Text>
-                  </View>
-
-                  <View style={styles.treeInfo}>
-                    <Text style={styles.treeName}>
-                      {arbol.nombre_comun || 'Árbol sin nombre'}
-                    </Text>
-
-                    <Text style={styles.scientificName}>
-                      {arbol.nombre_cientifico || 'Especie no especificada'}
-                    </Text>
-
-                    <Text style={styles.code}>
-                      Código: {arbol.codigo}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.divider} />
-
-                <View style={styles.details}>
-                  <View style={styles.detailColumn}>
-                    <Text style={styles.detailLabel}>Zona</Text>
-
-                    <Text style={styles.detailValue}>
-                      {arbol.zona === 'Otra' && arbol.zona_otra
-                        ? arbol.zona_otra
-                        : arbol.zona || 'Sin ubicación'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.detailColumn}>
-                    <Text style={styles.detailLabel}>Altura</Text>
-
-                    <Text style={styles.detailValue}>
-                      {Number(arbol.altura_m).toLocaleString('es-CO')} m
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.details}>
-                  <View style={styles.detailColumn}>
-                    <Text style={styles.detailLabel}>Diámetro del tronco</Text>
-
-                    <Text style={styles.detailValue}>
-                      {Number(arbol.dap_cm).toLocaleString('es-CO')} cm
-                    </Text>
-                  </View>
-
-                  <View style={styles.detailColumn}>
-                    <Text style={styles.detailLabel}>Etapa</Text>
-
-                    <Text style={styles.detailValue}>
-                      {arbol.etapa || 'No especificada'}
-                    </Text>
-                  </View>
-                </View>
-
-                <View
-                  style={[
-                    styles.status,
-                    { backgroundColor: `${color}15` },
-                  ]}
-                >
-                  <View
-                    style={[styles.statusDot, { backgroundColor: color }]}
-                  />
-
-                  <Text style={[styles.statusText, { color }]}>
-                    {etiquetasEstado[estado]}
+          <View style={styles.photoActions}>
+            <PrimaryButton
+              title={form.photos.some((photo) => photo.tipo === 'completo') ? 'Cambiar foto general' : 'Agregar foto general'}
+              onPress={() => void form.pickPhoto('completo')}
+              variant="secondary"
+            />
+            <PrimaryButton
+              title={form.photos.some((photo) => photo.tipo === 'detalle') ? 'Cambiar foto de detalle' : 'Agregar foto de detalle'}
+              onPress={() => void form.pickPhoto('detalle')}
+              variant="secondary"
+            />
+            <PrimaryButton
+              title={`Agregar foto adicional (${form.photos.filter((photo) => photo.tipo === 'adicional').length}/3)`}
+              onPress={() => void form.pickPhoto('adicional')}
+              disabled={form.photos.filter((photo) => photo.tipo === 'adicional').length >= 3}
+              variant="secondary"
+            />
+          </View>
+          {form.photos.map((photo) => (
+            <Surface key={`${photo.tipo}-${photo.uri}`}>
+              <View style={styles.photoRow}>
+                <Image source={{ uri: photo.uri }} style={styles.thumbnail} contentFit="cover" />
+                <View style={styles.photoDescription}>
+                  <Text style={styles.photoTitle}>{photoLabel(photo.tipo)}</Text>
+                  <Text style={styles.helper} numberOfLines={1}>{photo.name}</Text>
+                  <Text style={styles.remove} onPress={() => form.removePhoto(photo)}>
+                    Quitar foto
                   </Text>
                 </View>
               </View>
-            );
-          })}
+            </Surface>
+          ))}
+        </Section>
 
-          {isFetching && (
-            <Text style={styles.refreshText}>Actualizando registros...</Text>
-          )}
-        </>
-      )}
+        <Section title="Especie y medidas">
+          <Controller
+            name="especie_id"
+            control={form.control}
+            render={({ field }) => (
+              <SelectField
+                label="Especie"
+                value={field.value}
+                options={catalogs.especies.map((item) => ({
+                  label: `${item.nombre_comun} (${item.nombre_cientifico})`,
+                  value: item.id,
+                }))}
+                onChange={field.onChange}
+              />
+            )}
+          />
+          <NumericField control={form.control} name="dap_cm" label="Diámetro del tronco (cm)" error={form.errors.dap_cm?.message} />
+          <NumericField control={form.control} name="altura_m" label="Altura (m)" error={form.errors.altura_m?.message} />
+          <NumericField control={form.control} name="copa_m" label="Diámetro de copa (m)" error={form.errors.copa_m?.message} />
+          <Controller
+            name="etapa"
+            control={form.control}
+            render={({ field }) => (
+              <SelectField
+                label="Etapa de desarrollo"
+                value={field.value}
+                options={etapas.map((value) => ({ label: value, value }))}
+                onChange={field.onChange}
+              />
+            )}
+          />
+        </Section>
 
-      <Text style={styles.note}>
-        La información se obtiene de la API del proyecto.
-      </Text>
-    </ScrollView>
+        <Section title="Interferencias y observaciones">
+          <Controller
+            name="interferencia"
+            control={form.control}
+            render={({ field }) => (
+              <SelectField
+                label="Interferencia"
+                value={field.value}
+                options={interferencias.map((value) => ({ label: value, value }))}
+                onChange={field.onChange}
+              />
+            )}
+          />
+          {form.interferenciaActual === 'Otra infraestructura' ? (
+            <Controller
+              name="interferencia_otra"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <Field
+                  label="Describe la interferencia"
+                  value={field.value}
+                  onChangeText={field.onChange}
+                  onBlur={field.onBlur}
+                  error={fieldState.error?.message}
+                />
+              )}
+            />
+          ) : null}
+          <Text style={styles.label}>Observaciones fitosanitarias</Text>
+          <View style={styles.chips}>
+            {catalogs.observaciones.map((observation) => (
+              <ChoiceChip
+                key={observation.codigo}
+                label={observation.etiqueta}
+                selected={form.observacionesActuales.includes(observation.codigo)}
+                onPress={() => form.toggleObservation(observation.codigo)}
+              />
+            ))}
+          </View>
+        </Section>
+
+        {form.formError ? <InlineMessage>{form.formError}</InlineMessage> : null}
+        {submitError ? <InlineMessage>{submitError}</InlineMessage> : null}
+        <PrimaryButton
+          title="Guardar árbol"
+          loading={submitting}
+          onPress={() => void form.submit()}
+        />
+      </ScrollView>
+    </Screen>
   );
 }
 
+function NumericField({
+  control,
+  name,
+  label,
+  error,
+}: {
+  control: ReturnType<typeof useTreeCreateForm>['control'];
+  name: 'dap_cm' | 'altura_m' | 'copa_m';
+  label: string;
+  error?: string;
+}) {
+  return (
+    <Controller
+      name={name}
+      control={control}
+      render={({ field }) => (
+        <Field
+          label={label}
+          value={field.value == null ? '' : String(field.value)}
+          onChangeText={(text) => field.onChange(text === '' ? undefined : Number(text))}
+          onBlur={field.onBlur}
+          keyboardType="decimal-pad"
+          error={error}
+        />
+      )}
+    />
+  );
+}
+
+function photoLabel(tipo: FotoLocal['tipo']) {
+  if (tipo === 'completo') return 'Vista general';
+  if (tipo === 'detalle') return 'Detalle';
+  return 'Foto adicional';
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F4F7F2',
-  },
-  content: {
-    padding: 20,
-    paddingBottom: 40,
-    width: '100%',
-    maxWidth: 850,
-    alignSelf: 'center',
-  },
-  header: {
-    marginBottom: 22,
-  },
-  eyebrow: {
-    color: '#287447',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-    marginBottom: 8,
-  },
-  title: {
-    color: '#173D2A',
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  subtitle: {
-    color: '#65766A',
-    fontSize: 14,
-    marginTop: 8,
-    lineHeight: 21,
-  },
-  summary: {
-    backgroundColor: '#1D5638',
-    borderRadius: 18,
-    padding: 20,
-    marginBottom: 18,
-  },
-  summaryLabel: {
-    color: '#D8E9DB',
-    fontSize: 13,
-  },
-  summaryNumber: {
-    color: '#FFFFFF',
-    fontSize: 34,
-    fontWeight: '800',
-    marginTop: 5,
-  },
-  summaryDescription: {
-    color: '#D8E9DB',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  search: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#DCE5DA',
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 15,
-    paddingVertical: 14,
-    fontSize: 14,
-    color: '#203D2C',
-    marginBottom: 15,
-  },
-  filters: {
-    gap: 8,
-    paddingBottom: 18,
-  },
-  filterButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 22,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#DCE5DA',
-  },
-  filterSelected: {
-    backgroundColor: '#1D5638',
-    borderColor: '#1D5638',
-  },
-  filterText: {
-    color: '#4E6254',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  filterTextSelected: {
-    color: '#FFFFFF',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    color: '#203D2C',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  resultCount: {
-    color: '#68796C',
-    fontSize: 12,
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E3EAE0',
-    padding: 17,
-    marginBottom: 13,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 13,
-  },
-  treeIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 15,
-    backgroundColor: '#E8F2E5',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  treeEmoji: {
-    fontSize: 27,
-  },
-  treeInfo: {
-    flex: 1,
-  },
-  treeName: {
-    color: '#203D2C',
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  scientificName: {
-    color: '#68796C',
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginTop: 3,
-  },
-  code: {
-    color: '#287447',
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 5,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#EDF1EA',
-    marginVertical: 15,
-  },
-  details: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 14,
-  },
-  detailColumn: {
-    flex: 1,
-  },
-  detailLabel: {
-    color: '#7A8A7D',
-    fontSize: 11,
-    marginBottom: 5,
-  },
-  detailValue: {
-    color: '#344D3B',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  status: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 20,
-    gap: 7,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  messageCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E3EAE0',
-    padding: 25,
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  messageTitle: {
-    color: '#203D2C',
-    fontSize: 16,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginTop: 12,
-  },
-  messageText: {
-    color: '#68796C',
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
-  },
-  errorIcon: {
-    color: '#B91C1C',
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  retryButton: {
-    backgroundColor: '#1D5638',
-    borderRadius: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 11,
-    marginTop: 16,
-  },
-  retryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  emptyEmoji: {
-    fontSize: 34,
-  },
-  refreshText: {
-    color: '#68796C',
-    fontSize: 12,
-    textAlign: 'center',
-    marginVertical: 8,
-  },
-  note: {
-    color: '#849087',
-    fontSize: 11,
-    textAlign: 'center',
-    marginTop: 12,
-  },
+  content: { padding: 20, paddingBottom: 40, gap: 16 },
+  helper: { color: palette.muted, fontSize: 13, lineHeight: 19 },
+  photoActions: { gap: 8 },
+  photoRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  thumbnail: { width: 76, height: 76, borderRadius: 8, backgroundColor: palette.line },
+  photoDescription: { flex: 1, gap: 5 },
+  photoTitle: { color: palette.ink, fontWeight: '800' },
+  remove: { color: palette.red, fontSize: 13, fontWeight: '700', paddingTop: 3 },
+  label: { color: palette.ink, fontSize: 14, fontWeight: '700' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 });

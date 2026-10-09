@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 import db
+import local_db
 
 # auto_error=False para devolver nuestro propio 401 con un mensaje claro
 esquema_bearer = HTTPBearer(auto_error=False)
@@ -28,6 +29,11 @@ def usuario_actual(
         raise HTTPException(status_code=401, detail="Falta el token. Inicia sesión.")
 
     token = credenciales.credentials
+    if local_db.enabled():
+        if token != local_db.LOCAL_TOKEN:
+            raise HTTPException(status_code=401, detail="Token inválido o expirado.")
+        return Sesion(token=token, user_id=local_db.LOCAL_USER_ID, email=local_db.LOCAL_EMAIL)
+
     try:
         # Supabase Auth confirma que el token es válido y no ha expirado
         usuario = db.get_admin().auth.get_user(token).user

@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
+import { Platform } from 'react-native';
 import { useForm, useWatch } from 'react-hook-form';
 
 import { useCaptureLocation } from '@/features/trees/hooks/useCaptureLocation';
@@ -36,6 +37,43 @@ export function useTreeCreateForm(onSubmit: (values: ArbolCrear, photos: FotoLoc
   const observacionesActuales = useWatch({ control, name: 'observaciones' }) ?? [];
 
   async function pickPhoto(tipo: FotoLocal['tipo']) {
+    function savePhoto(asset: ImagePicker.ImagePickerAsset) {
+      if (tipo === 'adicional' && photos.filter((photo) => photo.tipo === 'adicional').length >= 3) {
+        setFormError('Puedes agregar hasta tres fotografías adicionales.');
+        return;
+      }
+      setPhotos((current) => {
+        if (tipo === 'adicional') {
+          return [...current, {
+            tipo,
+            uri: asset.uri,
+            name: asset.fileName ?? `${tipo}-${Date.now()}.jpg`,
+            mimeType: asset.mimeType ?? 'image/jpeg',
+          }];
+        }
+        return [
+          ...current.filter((photo) => photo.tipo !== tipo),
+          {
+            tipo,
+            uri: asset.uri,
+            name: asset.fileName ?? `${tipo}-${Date.now()}.jpg`,
+            mimeType: asset.mimeType ?? 'image/jpeg',
+          },
+        ];
+      });
+      setFormError(undefined);
+    }
+
+    if (Platform.OS === 'web') {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.85,
+      });
+      if (result.canceled || !result.assets[0]) return;
+      savePhoto(result.assets[0]);
+      return;
+    }
+
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       setFormError('Permite el acceso a la cámara para tomar evidencia del árbol.');
@@ -43,17 +81,7 @@ export function useTreeCreateForm(onSubmit: (values: ArbolCrear, photos: FotoLoc
     }
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 });
     if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    setPhotos((current) => [
-      ...current.filter((photo) => photo.tipo !== tipo),
-      {
-        tipo,
-        uri: asset.uri,
-        name: asset.fileName ?? `${tipo}-${Date.now()}.jpg`,
-        mimeType: asset.mimeType ?? 'image/jpeg',
-      },
-    ]);
-    setFormError(undefined);
+    savePhoto(result.assets[0]);
   }
 
   async function updateLocation() {
@@ -69,6 +97,10 @@ export function useTreeCreateForm(onSubmit: (values: ArbolCrear, photos: FotoLoc
       ? observacionesActuales.filter((value) => value !== code)
       : [...observacionesActuales, code];
     setValue('observaciones', updated, { shouldValidate: true });
+  }
+
+  function removePhoto(photoToRemove: FotoLocal) {
+    setPhotos((current) => current.filter((photo) => photo !== photoToRemove));
   }
 
   const submit = handleSubmit(async (input) => {
@@ -105,6 +137,7 @@ export function useTreeCreateForm(onSubmit: (values: ArbolCrear, photos: FotoLoc
     interferenciaActual,
     observacionesActuales,
     pickPhoto,
+    removePhoto,
     updateLocation,
     toggleObservation,
     submit,

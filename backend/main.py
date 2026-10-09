@@ -15,14 +15,16 @@ import uuid
 from collections import Counter
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from postgrest.exceptions import APIError
 from supabase_auth.errors import AuthApiError
 
 import calculos
 import db
+import local_db
 from auth import Sesion, usuario_actual
 from schemas import (
     ArbolCrear,
@@ -47,6 +49,11 @@ app = FastAPI(
     title="Inventario Arbóreo Escolar API",
     version="1.0.0",
     description="Backend del inventario arbóreo: registro de árboles, fotos, cálculos y estadísticas.",
+)
+app.mount(
+    "/archivos/fotos",
+    StaticFiles(directory=str(local_db.PHOTO_DIR), check_dir=False),
+    name="fotos-locales-temporales",
 )
 
 # CORS: qué direcciones del frontend pueden llamar a esta API (separadas por coma en .env)
@@ -117,7 +124,11 @@ def _url_firmada(cliente, ruta: str, segundos: int = 3600) -> str | None:
 # ===================================== Salud =====================================
 @app.get("/salud", tags=["General"])
 def salud():
-    return {"estado": "ok"}
+    return {
+        "estado": "ok",
+        "almacenamiento": "sqlite" if local_db.enabled() else "supabase",
+        "temporal": local_db.enabled(),
+    }
 
 
 # ================================ Autenticación ==================================
@@ -125,6 +136,15 @@ def salud():
 def login(datos: LoginIn):
     """Inicia sesión y devuelve el token. El frontend lo envía luego como
     `Authorization: Bearer <access_token>`."""
+    if local_db.enabled():
+        if not local_db.authenticate(datos.email, datos.password):
+            raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
+        return SesionOut(
+            access_token=local_db.LOCAL_TOKEN,
+            user_id=local_db.LOCAL_USER_ID,
+            email=local_db.LOCAL_EMAIL,
+        )
+
     try:
         res = db.nuevo_cliente_anon().auth.sign_in_with_password(
             {"email": datos.email, "password": datos.password}
@@ -149,6 +169,9 @@ def login(datos: LoginIn):
 def catalogos():
     """Especies, instituciones y casillas fitosanitarias para llenar el formulario.
     Son datos públicos, por eso no piden token."""
+    if local_db.enabled():
+        return Catalogos(**local_db.catalogs())
+
     admin = db.get_admin()
     return Catalogos(
         especies=admin.table("especies").select("*").order("nombre_comun").execute().data,
@@ -166,6 +189,12 @@ def catalogos():
 def crear_arbol(datos: ArbolCrear, sesion: Sesion = Depends(usuario_actual)):
     """Registra un árbol con sus observaciones. El código (IE001-0001) y el
     usuario que lo registra los asigna la base de datos."""
+    if local_db.enabled():
+        try:
+            return local_db.create_tree(datos.model_dump(), sesion.user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     cliente = db.cliente_de_usuario(sesion.token)
 
     # 1) Validar que las casillas marcadas existan en el catálogo
@@ -204,6 +233,16 @@ def listar_arboles(
     sesion: Sesion = Depends(usuario_actual),
 ):
     """Lista de árboles (pantalla de lista del prototipo) con filtros y paginación."""
+    if local_db.enabled():
+        return local_db.list_trees(
+            institucion_id=institucion_id,
+            estado=estado,
+            especie=especie,
+            zona=zona,
+            limite=limite,
+            desplazamiento=desplazamiento,
+        )
+
     cliente = db.cliente_de_usuario(sesion.token)
     q = cliente.table("arboles_resumen").select("*")
     if institucion_id:
@@ -218,8 +257,22 @@ def listar_arboles(
 
 
 @app.get("/arboles/{arbol_id}", response_model=ArbolDetalle, tags=["Árboles"])
-def detalle_arbol(arbol_id: UUID, sesion: Sesion = Depends(usuario_actual)):
+def detalle_arbol(arbol_id: UUID, request: Request, sesion: Sesion = Depends(usuario_actual)):
     """Un árbol con sus observaciones y sus fotos (URLs temporales)."""
+    if local_db.enabled():
+        detalle = local_db.tree_detail(str(arbol_id))
+        if detalle is None:
+            raise HTTPException(status_code=404, detail="Árbol no encontrado")
+        detalle["fotos"] = [
+            {
+                "id": foto["id"],
+                "tipo": foto["tipo"],
+                "url": str(request.base_url) + "archivos/fotos/" + foto["storage_path"],
+            }
+            for foto in detalle["fotos"]
+        ]
+        return detalle
+
     cliente = db.cliente_de_usuario(sesion.token)
     resumen = _resumen_por_id(cliente, str(arbol_id))
 
@@ -248,6 +301,20 @@ def detalle_arbol(arbol_id: UUID, sesion: Sesion = Depends(usuario_actual)):
 @app.get("/arboles/{arbol_id}/calculos", response_model=Calculos, tags=["Árboles"])
 def calculos_arbol(arbol_id: UUID, sesion: Sesion = Depends(usuario_actual)):
     """Biomasa, carbono, CO2 y O2 estimados para un árbol."""
+    if local_db.enabled():
+        arbol = local_db.tree_detail(str(arbol_id))
+        if arbol is None:
+            raise HTTPException(status_code=404, detail="Árbol no encontrado")
+        return Calculos(
+            codigo=arbol["codigo"],
+            nombre_comun=arbol["nombre_comun"],
+            dap_cm=arbol["dap_cm"],
+            altura_m=arbol["altura_m"],
+            metodo=calculos.METODO,
+            advertencia=calculos.ADVERTENCIA,
+            **calculos.calcular(arbol["dap_cm"], arbol["altura_m"], arbol["nombre_comun"]),
+        )
+
     cliente = db.cliente_de_usuario(sesion.token)
     a = _resumen_por_id(cliente, str(arbol_id))
     valores = calculos.calcular(a["dap_cm"], a["altura_m"], a["nombre_comun"])
@@ -276,11 +343,25 @@ def subir_foto(
     if extension is None:
         raise HTTPException(status_code=422, detail="Formato no permitido. Usa JPG, PNG o WebP.")
 
-    contenido = archivo.file.read()
+    contenido = archivo.file.read(MAX_FOTO_BYTES + 1)
     if not contenido:
         raise HTTPException(status_code=422, detail="El archivo está vacío")
     if len(contenido) > MAX_FOTO_BYTES:
         raise HTTPException(status_code=413, detail="La foto supera el máximo de 5 MB")
+
+    if local_db.enabled():
+        extension = EXTENSIONES[archivo.content_type or ""]
+        nombre = f"{uuid.uuid4().hex}.{extension}"
+        try:
+            return local_db.add_photo(
+                str(arbol_id), sesion.user_id, tipo, nombre, contenido
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     cliente = db.cliente_de_usuario(sesion.token)
 
@@ -316,6 +397,9 @@ def subir_foto(
 @app.get("/estadisticas", response_model=Estadisticas, tags=["Estadísticas"])
 def estadisticas(sesion: Sesion = Depends(usuario_actual)):
     """Datos para las pantallas de inicio y estadísticas."""
+    if local_db.enabled():
+        return Estadisticas(**local_db.statistics())
+
     cliente = db.cliente_de_usuario(sesion.token)
     filas = _traer_todo(
         cliente,

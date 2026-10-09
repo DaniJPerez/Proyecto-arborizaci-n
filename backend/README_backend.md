@@ -6,6 +6,16 @@ API en **FastAPI** conectada a **Supabase** (PostgreSQL + RLS + Storage).
 React  →  FastAPI (este proyecto)  →  Supabase
 ```
 
+> **Modo temporal para presentaciones:** si no hay `SUPABASE_URL`, el backend usa
+> SQLite automáticamente. También se puede seleccionar con `DATABASE_MODE=sqlite`.
+> Los registros quedan en `backend/data/inventario.sqlite3` y las fotos en
+> `backend/storage/fotos/`. Son archivos locales de demostración, no una base de
+> datos definitiva ni un almacenamiento compartido: no sincronizan entre equipos,
+> pueden perderse si se elimina la carpeta y no deben usarse para datos reales.
+> Las carpetas de datos y fotos están excluidas de Git para evitar publicar
+> información personal. El catálogo SQLite incluido es de ejemplo y debe
+> reemplazarse por el catálogo aprobado antes de producción.
+
 - Los datos del usuario se leen y escriben **con su propio token**, así el RLS de Supabase decide qué puede ver y editar.
 - La lógica (validaciones, biomasa, CO₂, O₂, estadísticas) vive en Python.
 
@@ -37,6 +47,13 @@ pip freeze > requerimientos.txt
 Variables del `.env`:
 
 ```
+DATABASE_MODE=sqlite
+SQLITE_PATH=data/inventario.sqlite3
+LOCAL_PHOTO_DIR=storage/fotos
+DEMO_EMAIL=demo@arboles.local
+DEMO_PASSWORD=demo123
+
+# Solo se necesitan al cambiar a Supabase:
 SUPABASE_URL=https://TU_ID.supabase.co
 SUPABASE_ANON_KEY=sb_publishable_...
 SUPABASE_SERVICE_KEY=sb_secret_...
@@ -44,6 +61,11 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 ```
 
 `CORS_ORIGINS` son las direcciones del frontend que pueden llamar a la API.
+
+En modo SQLite no se requiere configurar Supabase. El usuario local de demostración
+se puede cambiar con `DEMO_EMAIL` y `DEMO_PASSWORD`; no reutilices estas credenciales
+temporales para una instalación real. Para volver a Supabase, configura
+`DATABASE_MODE=supabase` y completa las variables `SUPABASE_*`.
 
 ## Ejecutar
 
@@ -65,7 +87,7 @@ Usan un cliente de Supabase falso: comprueban las validaciones, los permisos, la
 
 | Método | Ruta | ¿Token? | Qué hace |
 |---|---|---|---|
-| GET | `/salud` | No | Comprueba que el servidor responde |
+| GET | `/salud` | No | Comprueba el servidor e informa si el almacenamiento es temporal |
 | POST | `/auth/login` | No | Devuelve el token (`access_token`) |
 | GET | `/catalogos` | No | Especies, instituciones y casillas fitosanitarias |
 | POST | `/arboles` | Sí | Registra un árbol con sus observaciones |
@@ -167,6 +189,15 @@ La densidad es 0.6 g/cm³ para todas las especies mientras no se complete el dic
 
 ## Limitaciones conocidas
 
+- SQLite es un modo temporal de demostración. Su catálogo se inicializa con
+  instituciones, especies y observaciones de ejemplo; reemplázalos por los
+  catálogos oficiales antes de integrar la base definitiva.
+- `backend/data/inventario.sqlite3` y `backend/storage/fotos/` persisten en el
+  computador donde se ejecuta el backend, pero están ignorados por Git y no se
+  comparten con otros equipos. Haz copias manuales antes de borrar esos archivos
+  si necesitas conservar una demostración.
+- El acceso local usa una única cuenta de demostración configurable, no ofrece
+  administración de usuarios ni debe exponerse a Internet.
 - El prototipo no tiene login: React debe iniciar sesión con `/auth/login` (o `supabase-js`) antes de usar los endpoints protegidos. Los usuarios se crean a mano en Supabase.
 - Si el registro de observaciones falla, el árbol se borra para no quedar a medias, pero el consecutivo del código ya consumido no se recupera.
 - La regla "mínimo 2 fotos (completo + detalle)" no se obliga en la base de datos: el frontend debe subirlas después de crear el árbol.
