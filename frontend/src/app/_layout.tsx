@@ -13,12 +13,12 @@ function SessionGate() {
 
   const inLogin = segments[0] === 'login';
   const inApp = segments[0] === '(app)';
-  const inPreview = segments[0] === 'inventario-preview';
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
 
+  // Esperar a que se compruebe la sesión.
   if (!hydrated) {
     return (
       <View
@@ -34,23 +34,18 @@ function SessionGate() {
     );
   }
 
-  // Permitir el acceso temporal al inventario de demostración.
-  if (
-    !session &&
-    !inLogin &&
-    !inPreview &&
-    segments.length > 0
-  ) {
+  // Si no hay sesión, dirigir al inicio de sesión.
+  if (!session && !inLogin && segments.length > 0) {
     return <Redirect href={'/login' as Href} />;
   }
 
-  // Si hay sesión, enviar al panel principal al entrar al login.
+  // Si ya hay sesión, evitar volver al inicio de sesión.
   if (session && inLogin) {
     return <Redirect href={'/(app)' as Href} />;
   }
 
   // Si hay sesión, mantener la navegación dentro de la aplicación.
-  if (session && !inApp && !inPreview && segments[0] !== undefined) {
+  if (session && !inApp && segments[0] !== undefined) {
     return <Redirect href={'/(app)' as Href} />;
   }
 
